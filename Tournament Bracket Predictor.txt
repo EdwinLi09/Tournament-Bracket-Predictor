@@ -1,0 +1,1041 @@
+// Final Project - Tournament Bracket Predictor by Edwin Li
+// OPIM 3402
+
+import { StyleSheet, Text, View, TouchableOpacity, ScrollView, TextInput, Image, Alert, Keyboard, TouchableWithoutFeedback } from 'react-native';
+import { NavigationContainer } from '@react-navigation/native';
+import { createStackNavigator } from '@react-navigation/stack';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useState, useEffect } from 'react';
+
+const Stack = createStackNavigator();
+
+// Tournament options. Each tournament has its own title, logo, and storage keys
+// so the teams and brackets are saved separately for each one.
+const tournaments = [
+  {
+    id: 'ucl',
+    title: 'Champions League',
+    logo: 'https://media.api-sports.io/football/leagues/2.png',
+    teamsKey: 'uclTeamsList',
+    bracketKey: 'uclBracketData'
+  },
+  {
+    id: 'worldcup',
+    title: 'World Cup',
+    logo: 'https://img.asmedia.epimg.net/resizer/v2/F5MBOPJ3X5A35EJX2HXMUUFQNU.png?auth=99b5fd446e2d79b1c4046684d6f7a0ae5a9e31c4c63c20c014f8ad982e51998d&width=1472&height=1104&smart=true',
+    teamsKey: 'worldcupTeamsList',
+    bracketKey: 'worldcupBracketData'
+  },
+  {
+    id: 'ncaa',
+    title: 'NCAA Basketball',
+    logo: 'https://www.ncaa.com/_flysystem/public-s3/images/2024-02/MM_Logo_RGB_300.png',
+    teamsKey: 'ncaaTeamsList',
+    bracketKey: 'ncaaBracketData'
+  }
+];
+
+// Round of 16 matchup pairs, using team list positions
+const round16Matchups = [
+  [0, 1], [2, 3], [4, 5], [6, 7],
+  [8, 9], [10, 11], [12, 13], [14, 15]
+];
+
+// HOME SCREEN - pick a tournament
+function HomeScreen(props) {
+  return (
+    <View style={styles.homeContainer}>
+      <Text style={styles.mainTitle}>Tournament Bracket Predictor</Text>
+      <Text style={styles.subtitle}>Pick a tournament to start</Text>
+
+      {tournaments.map((t) => (
+        <TouchableOpacity key={t.id} style={styles.tournamentButton} onPress={() => props.navigation.navigate('Menu', { tournament: t })}>
+          <Image style={styles.tournamentLogo} source={{ uri: t.logo }} />
+          <Text style={styles.tournamentButtonText}>{t.title}</Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
+
+// MENU SCREEN - once a tournament is picked, show the 3 options
+function MenuScreen(props) {
+  const tournament = props.route.params.tournament;
+
+  return (
+    <View style={styles.homeContainer}>
+      <Image style={styles.trophyImage} source={{ uri: tournament.logo }} />
+      <Text style={styles.mainTitle}>{tournament.title}</Text>
+      <Text style={styles.subtitle}>Predict your {tournament.title} winner</Text>
+
+      <TouchableOpacity style={styles.homeButton} onPress={() => props.navigation.navigate('Setup', { tournament: tournament })}>
+        <Text style={styles.homeButtonText}>1. Setup Teams</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.homeButton} onPress={() => props.navigation.navigate('Bracket', { tournament: tournament })}>
+        <Text style={styles.homeButtonText}>2. Fill Out Bracket</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.homeButton} onPress={() => props.navigation.navigate('Summary', { tournament: tournament })}>
+        <Text style={styles.homeButtonText}>View My Predictions</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity style={[styles.homeButton, { borderColor: 'red', marginTop: 20 }]} onPress={() => props.navigation.navigate('Home')}>
+        <Text style={[styles.homeButtonText, { color: 'red' }]}>Switch Tournament</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+// SETUP TEAMS SCREEN
+function SetupScreen(props) {
+  const tournament = props.route.params.tournament;
+  const TEAMS_KEY = tournament.teamsKey;
+  const BRACKET_KEY = tournament.bracketKey;
+
+  const [teamName, setTeamName] = useState('');
+  const [imageUrl, setImageUrl] = useState('');
+  const [teamsList, setTeamsList] = useState([]);
+
+  useEffect(() => {
+    loadTeams();
+  }, []);
+
+  const loadTeams = async () => {
+    try {
+      const saved = await AsyncStorage.getItem(TEAMS_KEY);
+      if (saved !== null) {
+        setTeamsList(JSON.parse(saved));
+      } else {
+        setTeamsList([]);
+      }
+    } catch (e) {
+      setTeamsList([]);
+    }
+  };
+
+  const addTeam = async () => {
+    const trimmedName = teamName.trim();
+    const trimmedUrl = imageUrl.trim();
+
+    if (trimmedName === '' || trimmedUrl === '') {
+      Alert.alert('Invalid Input', 'Please enter both a team name and an image URL', [{ text: 'OK' }]);
+      return;
+    }
+
+    if (teamsList.length >= 16) {
+      Alert.alert('Limit Reached', 'You can only have 16 teams in the bracket', [{ text: 'OK' }]);
+      return;
+    }
+
+    try {
+      const newTeams = [...teamsList, { id: Math.random().toString(), name: trimmedName, logo: trimmedUrl }];
+      await AsyncStorage.setItem(TEAMS_KEY, JSON.stringify(newTeams));
+      // Clear bracket since teams changed
+      await AsyncStorage.removeItem(BRACKET_KEY);
+      setTeamsList(newTeams);
+      setTeamName('');
+      setImageUrl('');
+      Keyboard.dismiss();
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  const removeTeam = async (teamID) => {
+    try {
+      const updated = teamsList.filter((t) => t.id !== teamID);
+      await AsyncStorage.setItem(TEAMS_KEY, JSON.stringify(updated));
+      // Clear bracket since teams changed
+      await AsyncStorage.removeItem(BRACKET_KEY);
+      setTeamsList(updated);
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  const clearAll = () => {
+    Alert.alert('Clear All Teams', 'Are you sure? This will also reset your bracket.', [
+      { text: 'Cancel' },
+      {
+        text: 'Clear',
+        onPress: async () => {
+          await AsyncStorage.removeItem(TEAMS_KEY);
+          await AsyncStorage.removeItem(BRACKET_KEY);
+          setTeamsList([]);
+        }
+      }
+    ]);
+  };
+
+  return (
+    <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()}>
+      <View style={styles.setupContainer}>
+        <Text style={styles.setupTitle}>{tournament.title}: {teamsList.length} / 16 Teams</Text>
+        <Text style={styles.setupHint}>Teams 1-2 play Match 1, teams 3-4 play Match 2, etc.</Text>
+
+        <View style={styles.inputSection}>
+          <Text style={styles.inputLabel}>Team Name:</Text>
+          <TextInput
+            style={styles.textInput}
+            value={teamName}
+            onChangeText={setTeamName}
+            placeholder='e.g. Bayern Munich'
+          />
+          <Text style={styles.inputLabel}>Image URL:</Text>
+          <TextInput
+            style={styles.textInput}
+            value={imageUrl}
+            onChangeText={setImageUrl}
+            placeholder='https://...'
+          />
+          <TouchableOpacity style={styles.addButton} onPress={addTeam}>
+            <Text style={styles.addButtonText}>Add Team</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView style={styles.teamsScroll} keyboardShouldPersistTaps='handled'>
+          {teamsList.map((team, idx) => (
+            <TouchableOpacity key={team.id} style={styles.teamRow} onPress={() => removeTeam(team.id)}>
+              <Text style={styles.teamRowNum}>{idx + 1}.</Text>
+              <Image style={styles.teamRowLogo} source={{ uri: team.logo }} />
+              <Text style={styles.teamRowName}>{team.name}</Text>
+              <Text style={styles.teamRowDelete}>tap to remove</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        {teamsList.length > 0 && (
+          <TouchableOpacity style={styles.clearAllButton} onPress={clearAll}>
+            <Text style={styles.clearAllText}>Clear All Teams</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </TouchableWithoutFeedback>
+  );
+}
+
+// MATCH BOX COMPONENT 
+function MatchBox(props) {
+  const team1 = props.team1;
+  const team2 = props.team2;
+  const winner = props.winner;
+
+  const isTeam1Winner = winner && team1 && winner.id === team1.id;
+  const isTeam2Winner = winner && team2 && winner.id === team2.id;
+  const canSelect = team1 && team2;
+
+  return (
+    <View style={styles.matchBox}>
+      <Text style={styles.matchLabel}>{props.matchLabel}</Text>
+      <View style={styles.matchRow}>
+        {team1 && (
+          <TouchableOpacity
+            style={[styles.teamCard, isTeam1Winner && styles.selectedTeam]}
+            onPress={() => { if (canSelect) props.onSelect(team1); }}
+          >
+            <Image style={styles.teamLogo} source={{ uri: team1.logo }} />
+            <Text style={styles.teamName}>{team1.name}</Text>
+          </TouchableOpacity>
+        )}
+        {!team1 && (
+          <View style={[styles.teamCard, styles.tbdTeam]}>
+            <Text style={styles.tbdText}>TBD</Text>
+          </View>
+        )}
+
+        <Text style={styles.vsText}>vs</Text>
+
+        {team2 && (
+          <TouchableOpacity
+            style={[styles.teamCard, isTeam2Winner && styles.selectedTeam]}
+            onPress={() => { if (canSelect) props.onSelect(team2); }}
+          >
+            <Image style={styles.teamLogo} source={{ uri: team2.logo }} />
+            <Text style={styles.teamName}>{team2.name}</Text>
+          </TouchableOpacity>
+        )}
+        {!team2 && (
+          <View style={[styles.teamCard, styles.tbdTeam]}>
+            <Text style={styles.tbdText}>TBD</Text>
+          </View>
+        )}
+      </View>
+    </View>
+  );
+}
+
+//  BRACKET SCREEN
+function BracketScreen(props) {
+  const tournament = props.route.params.tournament;
+  const TEAMS_KEY = tournament.teamsKey;
+  const BRACKET_KEY = tournament.bracketKey;
+
+  const [teams, setTeams] = useState([]);
+  const [r16Winners, setR16Winners] = useState([null, null, null, null, null, null, null, null]);
+  const [qfWinners, setQfWinners] = useState([null, null, null, null]);
+  const [sfWinners, setSfWinners] = useState([null, null]);
+  const [champion, setChampion] = useState(null);
+
+  useEffect(() => {
+    loadTeams();
+    loadBracket();
+  }, []);
+
+  const loadTeams = async () => {
+    try {
+      const saved = await AsyncStorage.getItem(TEAMS_KEY);
+      if (saved !== null) {
+        setTeams(JSON.parse(saved));
+      }
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  const loadBracket = async () => {
+    try {
+      const saved = await AsyncStorage.getItem(BRACKET_KEY);
+      if (saved !== null) {
+        const data = JSON.parse(saved);
+        setR16Winners(data.r16);
+        setQfWinners(data.qf);
+        setSfWinners(data.sf);
+        setChampion(data.champion);
+      }
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  const saveBracket = async (r16, qf, sf, champ) => {
+    try {
+      const data = { r16: r16, qf: qf, sf: sf, champion: champ };
+      await AsyncStorage.setItem(BRACKET_KEY, JSON.stringify(data));
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  // Selecting a Round of 16 winner. If changing an existing pick,
+  // cascade-reset the dependent Quarter Final, Semi Final, and Champion.
+  const selectR16Winner = (matchIdx, team) => {
+    const newR16 = [...r16Winners];
+    const oldWinner = newR16[matchIdx];
+    newR16[matchIdx] = team;
+
+    let newQf = [...qfWinners];
+    let newSf = [...sfWinners];
+    let newChamp = champion;
+
+    if (oldWinner && oldWinner.id !== team.id) {
+      const qfIdx = Math.floor(matchIdx / 2);
+      newQf[qfIdx] = null;
+      const sfIdx = Math.floor(qfIdx / 2);
+      newSf[sfIdx] = null;
+      newChamp = null;
+    }
+
+    setR16Winners(newR16);
+    setQfWinners(newQf);
+    setSfWinners(newSf);
+    setChampion(newChamp);
+    saveBracket(newR16, newQf, newSf, newChamp);
+  };
+
+  const selectQfWinner = (matchIdx, team) => {
+    const newQf = [...qfWinners];
+    const oldWinner = newQf[matchIdx];
+    newQf[matchIdx] = team;
+
+    let newSf = [...sfWinners];
+    let newChamp = champion;
+
+    if (oldWinner && oldWinner.id !== team.id) {
+      const sfIdx = Math.floor(matchIdx / 2);
+      newSf[sfIdx] = null;
+      newChamp = null;
+    }
+
+    setQfWinners(newQf);
+    setSfWinners(newSf);
+    setChampion(newChamp);
+    saveBracket(r16Winners, newQf, newSf, newChamp);
+  };
+
+  const selectSfWinner = (matchIdx, team) => {
+    const newSf = [...sfWinners];
+    const oldWinner = newSf[matchIdx];
+    newSf[matchIdx] = team;
+
+    let newChamp = champion;
+    if (oldWinner && oldWinner.id !== team.id) {
+      newChamp = null;
+    }
+
+    setSfWinners(newSf);
+    setChampion(newChamp);
+    saveBracket(r16Winners, qfWinners, newSf, newChamp);
+  };
+
+  const selectChampion = (team) => {
+    setChampion(team);
+    saveBracket(r16Winners, qfWinners, sfWinners, team);
+  };
+
+  const resetBracket = () => {
+    Alert.alert('Reset Bracket', 'Clear all predictions?', [
+      { text: 'Cancel' },
+      {
+        text: 'Reset',
+        onPress: async () => {
+          const emptyR16 = [null, null, null, null, null, null, null, null];
+          const emptyQf = [null, null, null, null];
+          const emptySf = [null, null];
+          setR16Winners(emptyR16);
+          setQfWinners(emptyQf);
+          setSfWinners(emptySf);
+          setChampion(null);
+          await AsyncStorage.removeItem(BRACKET_KEY);
+        }
+      }
+    ]);
+  };
+
+  // If user has not added 16 teams yet, show message
+  if (teams.length < 16) {
+    return (
+      <View style={styles.emptyContainer}>
+        <Text style={styles.emptyTitle}>Not Enough Teams</Text>
+        <Text style={styles.emptyText}>You have {teams.length}/16 teams.{'\n'}Please add {16 - teams.length} more.</Text>
+        <TouchableOpacity style={[styles.homeButton, { borderColor: 'blue' }]} onPress={() => props.navigation.navigate('Setup', { tournament: tournament })}>
+          <Text style={[styles.homeButtonText, { color: 'blue' }]}>Go to Setup</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // Compute later rounds from earlier winners
+  const qfMatches = [
+    { team1: r16Winners[0], team2: r16Winners[1] },
+    { team1: r16Winners[2], team2: r16Winners[3] },
+    { team1: r16Winners[4], team2: r16Winners[5] },
+    { team1: r16Winners[6], team2: r16Winners[7] }
+  ];
+
+  const sfMatches = [
+    { team1: qfWinners[0], team2: qfWinners[1] },
+    { team1: qfWinners[2], team2: qfWinners[3] }
+  ];
+
+  const finalMatch = { team1: sfWinners[0], team2: sfWinners[1] };
+
+  const r16Count = r16Winners.filter((x) => x !== null).length;
+  const qfCount = qfWinners.filter((x) => x !== null).length;
+  const sfCount = sfWinners.filter((x) => x !== null).length;
+  let champCount = 0;
+  if (champion) {
+    champCount = 1;
+  }
+  const totalPicks = r16Count + qfCount + sfCount + champCount;
+
+  return (
+    <ScrollView style={styles.bracketScroll} contentContainerStyle={{ paddingBottom: 40 }}>
+      <View style={styles.progressBar}>
+        <Text style={styles.progressText}>{tournament.title} Picks: {totalPicks} / 15</Text>
+      </View>
+
+      <Text style={styles.roundTitle}>Round of 16</Text>
+      {round16Matchups.map((pair, idx) => (
+        <MatchBox
+          key={'r16-' + idx}
+          team1={teams[pair[0]]}
+          team2={teams[pair[1]]}
+          winner={r16Winners[idx]}
+          matchLabel={'Match ' + (idx + 1)}
+          onSelect={(team) => selectR16Winner(idx, team)}
+        />
+      ))}
+
+      <Text style={styles.roundTitle}>Quarter Finals</Text>
+      {qfMatches.map((match, idx) => (
+        <MatchBox
+          key={'qf-' + idx}
+          team1={match.team1}
+          team2={match.team2}
+          winner={qfWinners[idx]}
+          matchLabel={'QF ' + (idx + 1)}
+          onSelect={(team) => selectQfWinner(idx, team)}
+        />
+      ))}
+
+      <Text style={styles.roundTitle}>Semi Finals</Text>
+      {sfMatches.map((match, idx) => (
+        <MatchBox
+          key={'sf-' + idx}
+          team1={match.team1}
+          team2={match.team2}
+          winner={sfWinners[idx]}
+          matchLabel={'SF ' + (idx + 1)}
+          onSelect={(team) => selectSfWinner(idx, team)}
+        />
+      ))}
+
+      <Text style={styles.roundTitle}>Final</Text>
+      <MatchBox
+        team1={finalMatch.team1}
+        team2={finalMatch.team2}
+        winner={champion}
+        matchLabel={tournament.title + ' Final'}
+        onSelect={(team) => selectChampion(team)}
+      />
+
+      {champion && (
+        <View style={styles.championBox}>
+          <Image style={styles.trophyImageSmall} source={{ uri: tournament.logo }} />
+          <Text style={styles.championTitle}>Your Champion</Text>
+          <Image style={styles.championLogo} source={{ uri: champion.logo }} />
+          <Text style={styles.championName}>{champion.name}</Text>
+        </View>
+      )}
+
+      <TouchableOpacity style={styles.resetButton} onPress={resetBracket}>
+        <Text style={styles.resetText}>Reset Bracket</Text>
+      </TouchableOpacity>
+    </ScrollView>
+  );
+}
+
+// SUMMARY SCREEN 
+function SummaryScreen(props) {
+  const tournament = props.route.params.tournament;
+  const BRACKET_KEY = tournament.bracketKey;
+
+  const [data, setData] = useState(null);
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    try {
+      const saved = await AsyncStorage.getItem(BRACKET_KEY);
+      if (saved !== null) {
+        setData(JSON.parse(saved));
+      } else {
+        setData(null);
+      }
+    } catch (e) {
+      setData(null);
+    }
+  };
+
+  const clearPredictions = () => {
+    Alert.alert('Clear Predictions', 'Are you sure you want to clear all your predictions?', [
+      { text: 'Cancel' },
+      {
+        text: 'Clear',
+        onPress: async () => {
+          await AsyncStorage.removeItem(BRACKET_KEY);
+          setData(null);
+        }
+      }
+    ]);
+  };
+
+  if (data === null) {
+    return (
+      <View style={styles.emptyContainer}>
+        <Text style={styles.emptyTitle}>No Predictions Yet</Text>
+        <Text style={styles.emptyText}>Go fill out your {tournament.title} bracket first!</Text>
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView style={styles.summaryScroll} contentContainerStyle={{ padding: 20 }}>
+      {data.champion && (
+        <View style={styles.summaryChampion}>
+          <Image style={styles.trophyImageSmall} source={{ uri: tournament.logo }} />
+          <Text style={styles.summarySectionTitle}>Your Predicted {tournament.title} Champion</Text>
+          <Image style={styles.summaryChampLogo} source={{ uri: data.champion.logo }} />
+          <Text style={styles.summaryChampName}>{data.champion.name}</Text>
+        </View>
+      )}
+
+      <Text style={styles.summarySection}>Round of 16 Winners</Text>
+      {data.r16.map((team, idx) => (
+        <View key={'sr16-' + idx} style={styles.summaryRow}>
+          <Text style={styles.summaryMatchLabel}>Match {idx + 1}:</Text>
+          {team && (
+            <View style={styles.summaryTeam}>
+              <Image style={styles.summaryLogo} source={{ uri: team.logo }} />
+              <Text style={styles.summaryTeamName}>{team.name}</Text>
+            </View>
+          )}
+          {!team && (
+            <Text style={styles.summaryUnpicked}>Not picked</Text>
+          )}
+        </View>
+      ))}
+
+      <Text style={styles.summarySection}>Quarter Finals Winners</Text>
+      {data.qf.map((team, idx) => (
+        <View key={'sqf-' + idx} style={styles.summaryRow}>
+          <Text style={styles.summaryMatchLabel}>QF {idx + 1}:</Text>
+          {team && (
+            <View style={styles.summaryTeam}>
+              <Image style={styles.summaryLogo} source={{ uri: team.logo }} />
+              <Text style={styles.summaryTeamName}>{team.name}</Text>
+            </View>
+          )}
+          {!team && (
+            <Text style={styles.summaryUnpicked}>Not picked</Text>
+          )}
+        </View>
+      ))}
+
+      <Text style={styles.summarySection}>Semi Finals Winners</Text>
+      {data.sf.map((team, idx) => (
+        <View key={'ssf-' + idx} style={styles.summaryRow}>
+          <Text style={styles.summaryMatchLabel}>SF {idx + 1}:</Text>
+          {team && (
+            <View style={styles.summaryTeam}>
+              <Image style={styles.summaryLogo} source={{ uri: team.logo }} />
+              <Text style={styles.summaryTeamName}>{team.name}</Text>
+            </View>
+          )}
+          {!team && (
+            <Text style={styles.summaryUnpicked}>Not picked</Text>
+          )}
+        </View>
+      ))}
+
+      <TouchableOpacity style={styles.clearPredictionsButton} onPress={clearPredictions}>
+        <Text style={styles.clearPredictionsText}>Clear Predictions</Text>
+      </TouchableOpacity>
+    </ScrollView>
+  );
+}
+
+// APP 
+export default function App() {
+  const myOptions = {
+    headerTitleAlign: 'center',
+    headerTintColor: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+    headerStyle: { backgroundColor: 'black' }
+  };
+
+  return (
+    <NavigationContainer>
+      <SafeAreaView style={{ flex: 1 }}>
+        <Stack.Navigator screenOptions={myOptions}>
+          <Stack.Screen name='Home' component={HomeScreen} options={{ title: 'Pick a Tournament', headerLeft: () => null }} />
+          <Stack.Screen name='Menu' component={MenuScreen} options={(p) => ({ title: p.route.params.tournament.title })} />
+          <Stack.Screen name='Setup' component={SetupScreen} options={(p) => ({ title: p.route.params.tournament.title + ': Setup', headerBackTitle: 'Back' })} />
+          <Stack.Screen name='Bracket' component={BracketScreen} options={(p) => ({ title: p.route.params.tournament.title + ': Bracket', headerBackTitle: 'Back' })} />
+          <Stack.Screen name='Summary' component={SummaryScreen} options={(p) => ({ title: p.route.params.tournament.title + ': Predictions', headerBackTitle: 'Back' })} />
+        </Stack.Navigator>
+      </SafeAreaView>
+    </NavigationContainer>
+  );
+}
+
+// STYLES
+const styles = StyleSheet.create({
+  // Home screen
+  homeContainer: {
+    flex: 1,
+    backgroundColor: 'white',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20
+  },
+  trophyImage: {
+    width: 130,
+    height: 130,
+    resizeMode: 'contain',
+    marginBottom: 15
+  },
+  trophyImageSmall: {
+    width: 60,
+    height: 60,
+    resizeMode: 'contain'
+  },
+  mainTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: 'black',
+    marginBottom: 10,
+    textAlign: 'center'
+  },
+  subtitle: {
+    fontSize: 20,
+    color: 'blue',
+    textAlign: 'center',
+    marginBottom: 30,
+    fontWeight: 'bold'
+  },
+  homeButton: {
+    borderWidth: 4,
+    borderColor: 'gold',
+    paddingVertical: 14,
+    paddingHorizontal: 26,
+    marginBottom: 15,
+    width: 280,
+    alignItems: 'center'
+  },
+  homeButtonText: {
+    color: 'green',
+    fontSize: 18,
+    fontWeight: 'bold'
+  },
+  tournamentButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 4,
+    borderColor: 'gold',
+    paddingVertical: 14,
+    paddingHorizontal: 15,
+    marginBottom: 15,
+    width: 300,
+    borderRadius: 10
+  },
+  tournamentLogo: {
+    width: 50,
+    height: 50,
+    resizeMode: 'contain',
+    marginRight: 15
+  },
+  tournamentButtonText: {
+    color: 'green',
+    fontSize: 18,
+    fontWeight: 'bold',
+    flex: 1
+  },
+
+  // Setup screen
+  setupContainer: {
+    flex: 1,
+    backgroundColor: 'white',
+    padding: 15
+  },
+  setupTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: 'blue',
+    textAlign: 'center',
+    marginBottom: 5
+  },
+  setupHint: {
+    fontSize: 12,
+    color: 'brown',
+    textAlign: 'center',
+    marginBottom: 15
+  },
+  inputSection: {
+    marginBottom: 15
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: 'blue',
+    marginBottom: 3
+  },
+  textInput: {
+    borderWidth: 2,
+    borderColor: 'blue',
+    height: 40,
+    paddingHorizontal: 8,
+    marginBottom: 10
+  },
+  addButton: {
+    backgroundColor: 'lime',
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderRadius: 5
+  },
+  addButtonText: {
+    fontWeight: 'bold',
+    fontSize: 16
+  },
+  teamsScroll: {
+    flex: 1,
+    marginBottom: 10
+  },
+  teamRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'lightgray',
+    padding: 8,
+    marginBottom: 5,
+    borderRadius: 5
+  },
+  teamRowNum: {
+    fontWeight: 'bold',
+    width: 30,
+    color: 'blue'
+  },
+  teamRowLogo: {
+    width: 40,
+    height: 40,
+    resizeMode: 'contain'
+  },
+  teamRowName: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 10
+  },
+  teamRowDelete: {
+    color: 'red',
+    fontSize: 12
+  },
+  clearAllButton: {
+    backgroundColor: 'red',
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderRadius: 5
+  },
+  clearAllText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16
+  },
+
+  // Empty state (shared)
+  emptyContainer: {
+    flex: 1,
+    backgroundColor: 'white',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20
+  },
+  emptyTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: 'blue',
+    marginBottom: 10
+  },
+  emptyText: {
+    fontSize: 16,
+    color: 'red',
+    textAlign: 'center',
+    marginBottom: 20
+  },
+
+  // Bracket screen
+  bracketScroll: {
+    flex: 1,
+    backgroundColor: 'white'
+  },
+  progressBar: {
+    backgroundColor: 'blue',
+    paddingVertical: 10,
+    alignItems: 'center'
+  },
+  progressText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16
+  },
+  roundTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: 'blue',
+    textAlign: 'center',
+    marginTop: 20,
+    marginBottom: 10
+  },
+  matchBox: {
+    backgroundColor: 'white',
+    marginHorizontal: 15,
+    marginBottom: 10,
+    borderRadius: 10,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: 'lightgray'
+  },
+  matchLabel: {
+    fontSize: 12,
+    color: 'gray',
+    fontWeight: 'bold',
+    marginBottom: 6,
+    textAlign: 'center'
+  },
+  matchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  teamCard: {
+    flex: 1,
+    alignItems: 'center',
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: 'lightgray',
+    borderWidth: 2,
+    borderColor: 'lightgray',
+    minHeight: 90,
+    justifyContent: 'center'
+  },
+  selectedTeam: {
+    backgroundColor: 'lime',
+    borderColor: 'green'
+  },
+  tbdTeam: {
+    backgroundColor: 'lightgray'
+  },
+  tbdText: {
+    color: 'gray',
+    fontWeight: 'bold'
+  },
+  teamLogo: {
+    width: 40,
+    height: 40,
+    resizeMode: 'contain'
+  },
+  teamName: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginTop: 5,
+    textAlign: 'center'
+  },
+  vsText: {
+    marginHorizontal: 8,
+    fontWeight: 'bold',
+    color: 'gray'
+  },
+  championBox: {
+    backgroundColor: 'yellow',
+    margin: 15,
+    padding: 20,
+    borderRadius: 15,
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: 'black'
+  },
+  championTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: 'red',
+    marginVertical: 10
+  },
+  championLogo: {
+    width: 80,
+    height: 80,
+    resizeMode: 'contain'
+  },
+  championName: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: 'blue',
+    marginTop: 10
+  },
+  resetButton: {
+    backgroundColor: 'red',
+    marginHorizontal: 15,
+    marginTop: 20,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center'
+  },
+  resetText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16
+  },
+
+  // Summary screen
+  summaryScroll: {
+    flex: 1,
+    backgroundColor: 'white'
+  },
+  summaryChampion: {
+    backgroundColor: 'yellow',
+    padding: 20,
+    borderRadius: 15,
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: 'black',
+    marginBottom: 20
+  },
+  summarySectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: 'red',
+    marginBottom: 15,
+    marginTop: 10,
+    textAlign: 'center'
+  },
+  summaryChampLogo: {
+    width: 70,
+    height: 70,
+    resizeMode: 'contain'
+  },
+  summaryChampName: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: 'blue',
+    marginTop: 10
+  },
+  summarySection: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: 'blue',
+    marginTop: 15,
+    marginBottom: 8,
+    paddingBottom: 5,
+    borderBottomWidth: 2,
+    borderBottomColor: 'blue'
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'lightgray',
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 5
+  },
+  summaryMatchLabel: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: 'gray',
+    width: 80
+  },
+  summaryTeam: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1
+  },
+  summaryLogo: {
+    width: 30,
+    height: 30,
+    resizeMode: 'contain'
+  },
+  summaryTeamName: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginLeft: 10
+  },
+  summaryUnpicked: {
+    fontSize: 14,
+    color: 'gray',
+    fontStyle: 'italic'
+  },
+  clearPredictionsButton: {
+    backgroundColor: 'red',
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderRadius: 5,
+    marginTop: 25
+  },
+  clearPredictionsText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16
+  }
+});
