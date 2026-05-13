@@ -1,5 +1,4 @@
-// Final Project - Tournament Bracket Predictor by Edwin Li
-// OPIM 3402
+// Tournament Bracket Predictor by Edwin Li
 
 import { StyleSheet, Text, View, TouchableOpacity, ScrollView, TextInput, Image, Alert, Keyboard, TouchableWithoutFeedback } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
